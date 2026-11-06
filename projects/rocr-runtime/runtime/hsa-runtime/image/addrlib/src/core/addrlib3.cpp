@@ -1020,17 +1020,30 @@ ADDR_E_RETURNCODE Lib::ApplyCustomizedPitchHeight(
 
     const UINT_32  elementBytes = pIn->bpp >> 3;
 
+    UINT_32  pitchAlignmentElements      = pOut->blockExtent.width;
+    UINT_32  pitchSliceAlignmentElements = pOut->blockExtent.width;
+
+    if (IsLinear(pIn->swizzleMode))
+    {
+        // Normal pitch of image data
+        const UINT_32  pitchAlignmentBytes    = 1 << GetBlockSizeLog2(pIn->swizzleMode, TRUE);
+        pitchAlignmentElements = pitchAlignmentBytes / elementBytes;
+
+        // Pitch of image data used for slice sizing
+        const UINT_32  pitchSliceAlignmentBytes    =
+            1 << GetBlockSizeLog2(pIn->swizzleMode, CanTrimLinearPadding(pIn));
+        pitchSliceAlignmentElements = pitchSliceAlignmentBytes / elementBytes;
+    }
+
     // Calculate the default pitch/height without any user inputs
-    pOut->pitch  = PowTwoAlign(pIn->width,  pOut->blockExtent.width);
-    pOut->height = PowTwoAlign(pIn->height, pOut->blockExtent.height);
+    pOut->pitch         = PowTwoAlign(pIn->width,  pitchAlignmentElements);
+    pOut->pitchForSlice = PowTwoAlign(pIn->width,  pitchSliceAlignmentElements);
+    pOut->height        = PowTwoAlign(pIn->height, pOut->blockExtent.height);
 
     // Custom pitches / alignments are only possible with single mip level / linear images; otherwise,
     // ignore those parameters.
     if (UseCustomPitch(pIn))
     {
-        const UINT_32  pitchAlignmentBytes    = 1 << GetBlockSizeLog2(pIn->swizzleMode, TRUE);
-        const UINT_32  pitchAlignmentElements = pitchAlignmentBytes / elementBytes;
-
         // Their requested pitch has to meet the pitch alignment constraints applied by the HW.
         if ((pIn->pitchInElement % pitchAlignmentElements) != 0)
         {
@@ -1043,7 +1056,8 @@ ADDR_E_RETURNCODE Lib::ApplyCustomizedPitchHeight(
         }
         else
         {
-            pOut->pitch = pIn->pitchInElement;
+            pOut->pitch         = pIn->pitchInElement;
+            pOut->pitchForSlice = PowTwoAlign(pIn->pitchInElement, pitchSliceAlignmentElements);
         }
     }
 

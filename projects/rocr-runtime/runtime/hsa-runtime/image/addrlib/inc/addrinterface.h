@@ -4133,6 +4133,7 @@ typedef struct _ADDR3_COMPUTE_SURFACE_INFO_OUTPUT
 {
     UINT_32             size;                 ///< Size of this structure in bytes
     UINT_32             pitch;                ///< Pitch in elements (blocks for compressed formats)
+    UINT_32             pitchForSlice;        ///< Pitch in elements used to compute slice size
     UINT_32             pixelPitch;           ///< Pitch in original pixels
     UINT_32             pixelHeight;          ///< Height in original pixels
     UINT_32             pixelBits;            ///< Original bits per pixel, passed from input
