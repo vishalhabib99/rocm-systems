@@ -49,7 +49,7 @@ _GUIDANCE_PANEL_MIN_WIDTH = 100
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
-    """True when ``--debug-table-view`` requests plain tables over cli_style."""
+    """Return True when --debug-table-view asks for plain tables over cli_style."""
     return getattr(args, "view", None) == "table"
 
 

@@ -4,7 +4,7 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
@@ -27,42 +27,7 @@ def warn_deprecated_options(args: argparse.Namespace) -> None:
             )
 
 
-class _DelegatingAction(argparse.Action):
-    """Store argument values using a standard argparse action."""
-
-    def __init__(
-        self,
-        option_strings: Sequence[str],
-        help: str,
-        base_action: str,
-        **kwargs: Any,
-    ) -> None:
-        action_map = {
-            "store": argparse._StoreAction.__call__,
-            "store_const": argparse._StoreConstAction.__call__,
-            "store_true": argparse._StoreTrueAction.__call__,
-            "store_false": argparse._StoreFalseAction.__call__,
-            "append": argparse._AppendAction.__call__,
-            "append_const": argparse._AppendConstAction.__call__,
-            "count": argparse._CountAction.__call__,
-            "extend": argparse._ExtendAction.__call__,
-        }
-        if base_action not in action_map:
-            raise ValueError(f"Unsupported base_action: {base_action}")
-        self._base_action_call = action_map[base_action]
-        super().__init__(option_strings=option_strings, help=help, **kwargs)
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: object,
-        option_string: Optional[str] = None,
-    ) -> None:
-        self._base_action_call(self, parser, namespace, values, option_string)
-
-
-class ExperimentalAction(_DelegatingAction):
+class ExperimentalAction(argparse.Action):
     """
     Custom action that enforces experimental feature gating.
     - Suppresses help text when experimental mode is disabled
@@ -99,9 +64,25 @@ class ExperimentalAction(_DelegatingAction):
         super().__init__(
             option_strings=option_strings,
             help=help,
-            base_action=base_action,
             **kwargs,
         )
+
+        # Map of action types to their __call__ methods
+        action_map = {
+            "store": argparse._StoreAction.__call__,
+            "store_const": argparse._StoreConstAction.__call__,
+            "store_true": argparse._StoreTrueAction.__call__,
+            "store_false": argparse._StoreFalseAction.__call__,
+            "append": argparse._AppendAction.__call__,
+            "append_const": argparse._AppendConstAction.__call__,
+            "count": argparse._CountAction.__call__,
+            "extend": argparse._ExtendAction.__call__,
+        }
+
+        if base_action not in action_map:
+            raise ValueError(f"Unsupported base_action: {base_action}")
+
+        self._base_action_call = action_map[base_action]
 
     def __call__(
         self,
@@ -121,38 +102,7 @@ class ExperimentalAction(_DelegatingAction):
             f"{self.feature_label} is experimental and may change in future releases."
         )
 
-        super().__call__(parser, namespace, values, option_string)
-
-
-class DebugAction(_DelegatingAction):
-    """Gate diagnostic options and delegate their argument storage."""
-
-    def __init__(
-        self,
-        option_strings: Sequence[str],
-        help: str,
-        base_action: str,
-        debug_enabled: bool = False,
-        **kwargs: Any,
-    ) -> None:
-        self.debug_enabled = debug_enabled
-        super().__init__(
-            option_strings=option_strings,
-            help=help if debug_enabled else argparse.SUPPRESS,
-            base_action=base_action,
-            **kwargs,
-        )
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: object,
-        option_string: Optional[str] = None,
-    ) -> None:
-        if not self.debug_enabled:
-            parser.error(f"{option_string} requires --debug.")
-        super().__call__(parser, namespace, values, option_string)
+        self._base_action_call(self, parser, namespace, values, option_string)
 
 
 def validate_block(value: str) -> str:
@@ -188,7 +138,12 @@ def add_general_group(
     rocprof_compute_home: Path,
     supported_archs: Dict[str, str],
     rocprof_compute_version: Dict[str, Optional[str]],
-) -> None:
+    debug_enabled: bool,
+) -> argparse._ArgumentGroup:
+    """Add the options of every mode, and return the Debug Options group.
+
+    A mode adds its own debug options to the returned group.
+    """
     general_group = parser.add_argument_group("General Options")
 
     general_group.add_argument(
@@ -219,17 +174,6 @@ def add_general_group(
             "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
             "table 12.1.\n"
             "With analyze -p <workload>, list the workload's blocks and metrics."
-        ),
-    )
-    general_group.add_argument(
-        "--list-metrics-gfx-id",
-        dest="list_metrics_gfx_id",
-        metavar="<arch>",
-        choices=supported_archs.keys(),
-        help=(
-            "List the blocks of GPU <arch> instead of the current GPU.\n"
-            "Add --list-metrics [id ...] to list their metrics.\n"
-            f"Values: {', '.join(supported_archs)}"
         ),
     )
     general_group.add_argument(
@@ -268,6 +212,26 @@ def add_general_group(
             "--pc-sampling-interval)\n"
         ),
     )
+    general_group.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show the debug options in --help.",
+    )
+
+    debug_group = parser.add_argument_group("Debug Options")
+    debug_group.add_argument(
+        "--debug-list-metrics-gfx-id",
+        dest="list_metrics_gfx_id",
+        metavar="<arch>",
+        choices=supported_archs.keys(),
+        help=_debug_help(
+            "List the blocks of GPU <arch> instead of the current GPU.\n"
+            "Add --list-metrics [id ...] to list their metrics.\n"
+            f"Values: {', '.join(supported_archs)}",
+            debug_enabled,
+        ),
+    )
+    return debug_group
 
 
 def omniarg_parser(
@@ -289,6 +253,7 @@ def omniarg_parser(
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
+        debug_enabled,
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
@@ -333,6 +298,7 @@ Examples:
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
+        debug_enabled,
     )
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
@@ -698,15 +664,15 @@ Examples:
     )
     analyze_parser._optionals.title = "Help"
 
-    add_general_group(
+    analyze_debug_group = add_general_group(
         analyze_parser,
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
+        debug_enabled,
     )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
-    analyze_debug_group = analyze_parser.add_argument_group("Debug Options")
 
     analyze_group.add_argument(
         "-p",
@@ -903,41 +869,31 @@ Examples:
         help="\t\tSpecify desired decimal precision of analysis results. (DEFAULT: 2)",
     )
     analyze_debug_group.add_argument(
-        "--debug",
+        "--debug-single-metric",
         action="store_true",
-        help="\t\tEnable diagnostic options; use --debug --help to list them.",
+        help=_debug_help(
+            "Print the counter data, and each metric's expression and inputs.\n"
+            "Add --block <id> to print one metric.",
+            debug_enabled,
+        ),
     )
     analyze_debug_group.add_argument(
         "--debug-table-view",
         dest="view",
-        action=DebugAction,
-        base_action="store_const",
-        debug_enabled=debug_enabled,
-        nargs=0,
+        action="store_const",
         const="table",
-        default=None,
-        help="\t\tForce plain tables and ignore cli_style from YAML.",
-    )
-    analyze_debug_group.add_argument(
-        "--debug-single-metric",
-        action=DebugAction,
-        base_action="store_true",
-        debug_enabled=debug_enabled,
-        nargs=0,
-        const=True,
-        default=False,
-        help="\t\tShow metric evaluation and memory chart diagnostics.",
+        help=_debug_help(
+            "Force plain tables and ignore cli_style from YAML.", debug_enabled
+        ),
     )
     analyze_debug_group.add_argument(
         "--debug-verify-deps",
         dest="verify_deps",
-        action=DebugAction,
-        base_action="store_true",
-        debug_enabled=debug_enabled,
-        nargs=0,
-        const=True,
-        default=False,
-        help="\t\tCheck analyze dependencies, then exit.",
+        action="store_true",
+        help=_debug_help(
+            "Check the Python dependencies analyze mode needs, then exit.",
+            debug_enabled,
+        ),
     )
     analyze_advanced_group.add_argument(
         "--specs-correction",
@@ -963,3 +919,8 @@ def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
         if readme.is_file():
             return f"Agent Skills: see {readme} to install them."
     return None
+
+
+def _debug_help(help_text: str, debug_enabled: bool) -> str:
+    """Show a debug option in --help only when --debug is given."""
+    return help_text if debug_enabled else argparse.SUPPRESS

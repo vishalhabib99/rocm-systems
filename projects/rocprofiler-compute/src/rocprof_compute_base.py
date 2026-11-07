@@ -257,7 +257,7 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        # Detect feature gates for help text control.
+        # Detect --experimental and --debug, which control the help text
         prelim_parser = argparse.ArgumentParser(add_help=False)
         prelim_parser.add_argument("--experimental", action="store_true", default=False)
         prelim_parser.add_argument("--debug", action="store_true", default=False)
@@ -283,11 +283,11 @@ class RocProfCompute:
             self.__supported_archs,
             self.__version,
             experimental_requested,
-            debug_enabled=prelim_args.debug,
+            prelim_args.debug,
         )
         self.__args = self.__parser.parse_args()
         warn_deprecated_options(self.__args)
-        # --list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
+        # --debug-list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
         if self.__args.list_metrics_gfx_id and self.__args.list_metrics is None:
             self.__args.list_metrics = []
 
@@ -642,7 +642,7 @@ class RocProfCompute:
         args = self.__args
         if args.list_metrics_gfx_id is not None and self.__mode == "analyze":
             console_error(
-                "--list-metrics-gfx-id can't be used in analyze mode, which "
+                "--debug-list-metrics-gfx-id can't be used in analyze mode, which "
                 "lists the metrics of the -p workload's GPU."
             )
 
