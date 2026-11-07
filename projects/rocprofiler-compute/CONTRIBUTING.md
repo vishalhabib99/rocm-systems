@@ -137,61 +137,20 @@ When a feature is ready for general availability:
 
 ## Adding Debug Options
 
-Analyze diagnostics use `--debug` as a gate, not as a switch that enables every
-diagnostic. Options are hidden from help and rejected unless `--debug` is
-present. List them with:
+Debug options help diagnose rocprof-compute itself, and work without any gate.
+`--debug` only lists them in the help; the
+[analyze CLI documentation](docs/how-to/analyze/cli.rst#debug-options) describes
+the user-facing behavior.
 
-```bash
-rocprof-compute analyze --debug --help
-```
+To add a debug option in `src/argparser.py`:
 
-In `src/argparser.py`, register diagnostic options in `analyze_debug_group`
-with a `--debug-` prefix and `action=DebugAction`. Like `ExperimentalAction`,
-`DebugAction` inherits storage delegation from `_DelegatingAction`, which wraps
-`argparse.Action`. The required `base_action` uses the supported actions listed
-above; keep the delegation mapping in that shared base rather than copying it.
-It uses `debug_enabled`, not `experimental_enabled`, and does not emit an
-experimental warning or accept `feature_label`.
-
-For example, a boolean diagnostic uses:
-
-```python
-analyze_debug_group.add_argument(
-  "--debug-your-diagnostic",
-  action=DebugAction,
-  base_action="store_true",
-  debug_enabled=debug_enabled,
-  nargs=0,
-  const=True,
-  default=False,
-  help="\t\tDescription of the diagnostic.",
-)
-```
-
-Prefer argparse's default destination name so flags and attributes match:
-`--debug` stores `args.debug` and `--debug-single-metric` stores
-`args.debug_single_metric`. Set `dest` only when an existing non-boolean
-implementation attribute requires it, such as `view` for plain tables.
-For a value-taking
-option, use `base_action="store"` and the appropriate `type` and `metavar`
-instead of `nargs=0` and `const`. The startup parser in
-`src/rocprof_compute_base.py` already passes the gate state to `omniarg_parser`;
-do not add post-parse translation of diagnostic flags.
-
-Keep ordinary filtering, normalization, output-format, and baseline-comparison
-controls outside the debug gate, including `--specs-correction`. Do not add
-ungated aliases for diagnostic options. `--debug-single-metric` replaces the removed
-`-g` flag; `--debug` alone must not enable metric diagnostics.
-
-Extend `tests/unit/test_argparser.py` and, for startup behavior,
-`tests/unit/rocprof_compute_profile/test_profiler_base.py`. Check hidden and
-visible help, rejection without the gate, flag order independence, destination
-values, and independence from `--experimental`. Use the shared `parse_cli_args`
-fixture to exercise real startup gate detection rather than enabling the gate
-inside a test parser builder. Update integration commands, the
-[analyze CLI documentation](docs/how-to/analyze/cli.rst#debug-options), and the
-changelog whenever diagnostic syntax changes. Keep diagnostic instructions out
-of user-facing analysis skills.
+1. Name it `--debug-<name>`.
+2. Add it to the Debug Options group: the group that `add_general_group()`
+   returns for every mode, or `analyze_debug_group` for analyze only.
+3. Wrap its help text in `_debug_help(..., debug_enabled)`, so it shows only
+   with `--debug`.
+4. Check that `rocprof-compute <mode> --debug --help` lists it and
+   `rocprof-compute <mode> --help` doesn't.
 
 ## Using Pre-Commit Hooks
 

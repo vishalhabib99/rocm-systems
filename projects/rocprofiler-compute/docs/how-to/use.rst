@@ -89,12 +89,12 @@ lists all of block 2 (``sol``) and table 12.1.
    $ rocprof-compute --list-metrics all
 
 To list another GPU's blocks and metrics,
-for example on a machine without a GPU, use ``--list-metrics-gfx-id <arch>``:
+for example on a machine without a GPU, use ``--debug-list-metrics-gfx-id <arch>``:
 
 .. code-block:: shell
 
-   $ rocprof-compute --list-metrics-gfx-id gfx90a
-   $ rocprof-compute --list-metrics sol --list-metrics-gfx-id gfx90a
+   $ rocprof-compute --debug-list-metrics-gfx-id gfx90a
+   $ rocprof-compute --list-metrics sol --debug-list-metrics-gfx-id gfx90a
 
 To list the blocks and metrics of a profiled workload, use analyze mode:
 
