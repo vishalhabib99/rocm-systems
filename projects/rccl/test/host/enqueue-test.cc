@@ -4243,6 +4243,83 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
   EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
 }
 
+namespace {
+struct P2pTaskAppendScene {
+  static constexpr int kRanks = 4;
+  static constexpr int kPeer = 1;
+  static constexpr int kChannels = 8;
+  static constexpr int kChannelsPerPeer = 2;
+  static constexpr int kWideChannels = 4;
+
+  CollTaskComm cc;
+  std::vector<ncclComm::P2pSchedulePair> schedule = std::vector<ncclComm::P2pSchedulePair>(kRanks);
+  std::vector<ncclKernelPlanner::Peer> plannerPeers = std::vector<ncclKernelPlanner::Peer>(kRanks);
+  std::vector<ncclPeerInfo> peerInfo = std::vector<ncclPeerInfo>(kRanks);
+  std::vector<channelMasks> connectSend = std::vector<channelMasks>(kRanks);
+  std::vector<channelMasks> connectRecv = std::vector<channelMasks>(kRanks);
+  std::vector<ncclChannelPeer> channelPeers = std::vector<ncclChannelPeer>(kChannels * kRanks);
+  std::vector<ncclChannelPeer*> peerSlots = std::vector<ncclChannelPeer*>(kChannels * kRanks);
+  ncclInfo info{};
+  char buff = 0;
+
+  P2pTaskAppendScene() {
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      ncclGroupCommHead[type] = nullptr;
+      cc.get()->groupNext[type] = reinterpret_cast<ncclComm*>(NCCL_COMM_GROUP_INVALID);
+    }
+    SetParam("RCCL_P2P_DIRECT_MAX_CHANNELS", kWideChannels);
+    ncclComm* comm = cc.get();
+    comm->rank = 0;
+    comm->nRanks = kRanks;
+    comm->nNodes = 1;
+    comm->p2pnChannels = kChannels;
+    comm->p2pnChannelsPerPeer = kChannelsPerPeer;
+    comm->p2pChannelShiftSize = 0;
+    comm->workArgsBytes = sizeof(ncclDevKernelArgs) + kChannels * sizeof(ncclDevWorkBatch);
+    comm->p2pSchedule = schedule.data();
+    comm->planner.peers = plannerPeers.data();
+    comm->peerInfo = peerInfo.data();
+    comm->connectSend = connectSend.data();
+    comm->connectRecv = connectRecv.data();
+    for (int round = 0; round < kRanks; ++round) {
+      schedule[round].sendRank = round;
+      schedule[round].recvRank = (kRanks - round) % kRanks;
+    }
+    for (int channel = 0; channel < kChannels; ++channel) {
+      for (int peer = 0; peer < kRanks; ++peer)
+        peerSlots[channel * kRanks + peer] = &channelPeers[channel * kRanks + peer];
+      comm->channels[channel].peers = &peerSlots[channel * kRanks];
+    }
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskP2p);
+    info.comm = comm;
+    info.stream = nullptr;
+  }
+
+  ~P2pTaskAppendScene() {
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) ncclGroupCommHead[type] = nullptr;
+    ncclGroupCommPreconnectHead = nullptr;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, P2pTaskAppend_WidenedDirectTaskPreconnectsBothTiles) {
+  P2pTaskAppendScene sc;
+
+  ASSERT_EQ(ncclSuccess,
+            p2pTaskAppend(sc.cc.get(), &sc.info, ncclFuncSend, ncclFuncSend, &sc.buff, /*count=*/1, ncclInt8,
+                          P2pTaskAppendScene::kPeer, /*allowUB=*/false));
+
+  EXPECT_EQ(3, sc.plannerPeers[P2pTaskAppendScene::kPeer].sendSeen);
+  EXPECT_EQ(0xfcU, sc.connectSend[P2pTaskAppendScene::kPeer].masks[0])
+    << "normal channels 2-3 and widened channels 4-7 must all be connected";
+  for (int channel = 2; channel < P2pTaskAppendScene::kChannels; ++channel) {
+    const ncclConnector& conn =
+      sc.channelPeers[channel * P2pTaskAppendScene::kRanks + P2pTaskAppendScene::kPeer].send[1];
+    EXPECT_EQ(1, conn.hasSeen) << channel;
+    EXPECT_EQ(1, conn.p2pOnly) << channel;
+  }
+}
+
 // ===========================================================================
 // ceCollTaskAppend -- deferred CE staging setup (ROCM-32044)
 // ===========================================================================
